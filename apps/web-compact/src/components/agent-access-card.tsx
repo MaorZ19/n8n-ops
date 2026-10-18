@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router"
 import { Panel, PanelHead, SwitchRow, useSaveSource } from "@/components/kit"
 import { Button } from "@/components/ui/button"
@@ -19,17 +19,45 @@ const readOnly = (s: string) => /:(read|list)$/.test(s)
 
 /** Per instance: whether agents may ask for temporary access, and the most they may ever be granted. */
 export function AgentAccessCard({ id, name, scopesSource, keyScopes, agentAccess }: Props) {
-  const initialScopes = () => new Set(agentAccess.scopes.filter((s) => keyScopes.includes(s)))
-  const [enabled, setEnabled] = useState(agentAccess.enabled)
-  const [scopes, setScopes] = useState(initialScopes)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the stored access changes
-  useEffect(() => {
-    setEnabled(agentAccess.enabled)
-    setScopes(initialScopes())
-  }, [agentAccess, keyScopes])
+  const stored = () => ({
+    enabled: agentAccess.enabled,
+    scopes: new Set(agentAccess.scopes.filter((s) => keyScopes.includes(s))),
+  })
+  // `base` is the stored access the form started from; unsaved changes are counted against it.
+  const [base, setBase] = useState(stored)
+  const [enabled, setEnabled] = useState(base.enabled)
+  const [scopes, setScopes] = useState(base.scopes)
+  const count =
+    Number(enabled !== base.enabled) +
+    [...scopes].filter((s) => !base.scopes.has(s)).length +
+    [...base.scopes].filter((s) => !scopes.has(s)).length
+  const reset = () => {
+    const next = stored()
+    setBase(next)
+    setEnabled(next.enabled)
+    setScopes(next.scopes)
+  }
   const save = useApiMutation<{ agentAccess: Props["agentAccess"] }>("PATCH", `/instances/${id}`, {
     invalidate: ["/instances", `/instances/${id}`],
   })
+  // The stored access as it was when a save finished, until the refetch after it brings the saved value.
+  const savedOver = useRef<{ agentAccess: Props["agentAccess"]; keyScopes: string[] } | null>(null)
+  // Whenever the card has no unsaved changes, it shows the stored access: after a refetch or a change made
+  // elsewhere, and after edits that were changed back by hand. Unsaved changes stay, and Discard brings the
+  // stored value. While a save runs the card is locked, so nothing is edited under it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the stored access or the count changes
+  useEffect(() => {
+    if (save.isPending) return
+    if (savedOver.current?.agentAccess === agentAccess && savedOver.current.keyScopes === keyScopes) return
+    savedOver.current = null
+    if (count > 0) return
+    const next = stored()
+    const same =
+      next.enabled === base.enabled &&
+      next.scopes.size === base.scopes.size &&
+      [...next.scopes].every((s) => base.scopes.has(s))
+    if (!same) reset()
+  }, [agentAccess, keyScopes, count, save.isPending])
   const groups = new Map<string, string[]>()
   for (const s of [...keyScopes].sort()) {
     const resource = s.split(":")[0] ?? s
@@ -43,20 +71,16 @@ export function AgentAccessCard({ id, name, scopesSource, keyScopes, agentAccess
       return next
     })
   const unsupported = scopesSource === "declared"
-  const stored = initialScopes()
-  const count =
-    Number(enabled !== agentAccess.enabled) +
-    [...scopes].filter((s) => !stored.has(s)).length +
-    [...stored].filter((s) => !scopes.has(s)).length
   useSaveSource(`agent-access-${id}`, {
     label: "agent access",
     saved: "Agent access saved",
     count,
-    save: () => save.mutateAsync({ agentAccess: { enabled, scopes: [...scopes] } }),
-    discard: () => {
-      setEnabled(agentAccess.enabled)
-      setScopes(initialScopes())
+    save: async () => {
+      await save.mutateAsync({ agentAccess: { enabled, scopes: [...scopes] } })
+      savedOver.current = { agentAccess, keyScopes }
+      setBase({ enabled, scopes: new Set(scopes) })
     },
+    discard: reset,
   })
 
   return (
@@ -79,7 +103,7 @@ export function AgentAccessCard({ id, name, scopesSource, keyScopes, agentAccess
           Needs n8n 2.14 or later: n8n-ops checks every call against the scopes n8n declares for its API.
         </p>
       ) : (
-        <div className="grid gap-4 border-t border-line p-pad-x">
+        <fieldset disabled={save.isPending} className="grid min-w-0 gap-4 border-t border-line p-pad-x">
           <SwitchRow
             id={`agent-access-${id}`}
             title="Agents may request access"
@@ -129,7 +153,7 @@ export function AgentAccessCard({ id, name, scopesSource, keyScopes, agentAccess
               </p>
             </div>
           )}
-        </div>
+        </fieldset>
       )}
     </Panel>
   )
