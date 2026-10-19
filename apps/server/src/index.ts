@@ -1,3 +1,4 @@
+import { hkdfSync } from "node:crypto"
 import { EventEmitter } from "node:events"
 import { serve } from "@hono/node-server"
 import { createApp } from "./app.ts"
@@ -9,6 +10,7 @@ import { features } from "./features.ts"
 import { createAudit } from "./lib/audit.ts"
 import { createSecrets, loadOrCreateAppKey } from "./lib/crypto.ts"
 import { createSettings } from "./lib/settings.ts"
+import { createAgentConnect } from "./oauth/agents.ts"
 
 const config = loadConfig()
 const log = consoleLogger
@@ -31,6 +33,12 @@ const ctx: Ctx = {
   log,
   events: new EventEmitter().setMaxListeners(100),
 }
+
+// The authorization server for agents signs its cookies with a key derived from the app key.
+const cookieKey = Buffer.from(hkdfSync("sha256", key, "n8n-ops", "agent-connect-cookies", 32)).toString("base64")
+ctx.agents = createAgentConnect(ctx, { cookieKeys: [cookieKey], webDir: config.webDir })
+// Connections made under a public URL that has since changed end before the server takes a request.
+await ctx.agents.reconcile()
 
 await ctx.settings.loadDesign(log)
 const { mounts, start } = features(ctx)

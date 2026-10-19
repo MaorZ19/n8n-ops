@@ -13,6 +13,7 @@ import { queryClient } from "@/lib/api"
 import { pinDesign } from "@/lib/design"
 import { LoginPage } from "@/pages/auth/login"
 import { SetupPage } from "@/pages/auth/setup"
+import { ConnectApprovePage } from "@/pages/connect"
 
 // Development only: ?design=regular or ?design=compact previews a design without the server choosing it.
 if (import.meta.env.DEV) pinDesign(new URLSearchParams(window.location.search).get("design"))
@@ -22,7 +23,11 @@ const router = createBrowserRouter([
   { path: "/setup", element: <SetupPage /> },
   {
     element: <RequireAuth />,
-    children: [{ element: <AppShell />, children: routes }],
+    children: [
+      // An agent asking to connect: a page of its own, signed in, outside the console around it.
+      { path: "/connect/approve/:uid", element: <ConnectApprovePage /> },
+      { element: <AppShell />, children: routes },
+    ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
 ])
