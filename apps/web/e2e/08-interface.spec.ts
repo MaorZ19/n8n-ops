@@ -155,3 +155,77 @@ test("backups that are not set up link to storage and the backup key", async () 
     await page.unroute("**/api/backups")
   }
 })
+
+test("Connected agents and Account are pages of their own, and their old Settings addresses still open them", async () => {
+  await page.goto("/settings/tokens")
+  await expect(page).toHaveURL(/\/agents$/)
+  await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible()
+  await page.goto("/settings/account")
+  await expect(page).toHaveURL(/\/account$/)
+  await expect(page.getByRole("heading", { name: "Locked out?" })).toBeVisible()
+  await expect(page).toHaveTitle("Account · n8n-ops")
+
+  const sections = page.getByRole("navigation", { name: "Settings categories" })
+  await page.goto("/settings/general")
+  await expect(sections.getByRole("link", { name: "Agent access" })).toBeVisible()
+  await expect(sections.getByRole("link", { name: /Connected agents|Account/ })).toHaveCount(0)
+
+  // Agent access leads to Connected agents, and the account menu to Account.
+  await page.goto("/access")
+  await page.getByRole("banner").getByRole("link", { name: "Connected agents" }).click()
+  await expect(page).toHaveURL(/\/agents$/)
+  await page.getByRole("button", { name: "Account menu" }).click()
+  await page.getByRole("menuitem", { name: "Account" }).click()
+  await expect(page).toHaveURL(/\/account$/)
+})
+
+test("the time zone is chosen from a list with a search, and Back closes the list first", async () => {
+  const before = (await (await page.request.get("/api/settings/general")).json()) as { timezone: string }
+  await page.goto("/settings/general")
+  const field = page.getByRole("button", { name: /^Time zone:/ })
+  const search = page.getByRole("searchbox", { name: "Search time zones" })
+  await field.click()
+  await expect(search).toBeFocused()
+  await search.fill("jerusalem")
+  await expect(page.getByRole("option", { name: /Asia\/Jerusalem/ })).toBeVisible()
+  await page.goBack()
+  await expect(search).toHaveCount(0)
+  await expect(page).toHaveURL(/\/settings\/general$/)
+
+  // Opened again, the list is whole; Escape closes it and returns to the field.
+  await field.click()
+  await expect(search).toHaveValue("")
+  await page.keyboard.press("Escape")
+  await expect(search).toHaveCount(0)
+  await expect(field).toBeFocused()
+  await dialogClosed(page)
+
+  try {
+    // Picked and saved at once, without waiting for the list to give back its Back entry.
+    await field.click()
+    await search.fill("jerusalem")
+    await page.getByRole("option", { name: /Asia\/Jerusalem/ }).click()
+    await expect(field).toHaveAccessibleName(/^Time zone: Asia\/Jerusalem \(UTC\+0[23]:00\)$/)
+    await page.getByRole("button", { name: "Save" }).click()
+    await expect(page.getByText("Settings saved")).toBeVisible()
+    expect((await (await page.request.get("/api/settings/general")).json()).timezone).toBe("Asia/Jerusalem")
+
+    // A click beside the list only closes it, even on a link. None of the ways it closed left an entry
+    // behind: Back now leaves the page.
+    const overview = await page.getByRole("link", { name: "Overview", exact: true }).first().boundingBox()
+    await field.click()
+    await expect(search).toBeVisible()
+    await page.mouse.click((overview?.x ?? 0) + 10, (overview?.y ?? 0) + 10)
+    await expect(search).toHaveCount(0)
+    await expect(page).toHaveURL(/\/settings\/general$/)
+    await dialogClosed(page)
+    await page.goBack()
+    await expect(page).toHaveURL(/\/account$/)
+
+    // A new time zone must be a zone name: a fixed offset would not follow daylight saving.
+    const offset = await page.request.put("/api/settings/general", { data: { timezone: "+03:00" } })
+    expect(offset.status()).toBe(400)
+  } finally {
+    await page.request.put("/api/settings/general", { data: { timezone: before.timezone } })
+  }
+})

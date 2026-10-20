@@ -7,9 +7,9 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  Settings,
   ShieldCheck,
   Sun,
+  UserRound,
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Popover as PopoverPrimitive, Dialog as SheetPrimitive } from "radix-ui"
@@ -17,7 +17,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router"
 import { ChromeContext } from "@/app/chrome"
 import { DesignSync } from "@/app/design-sync"
-import { groups, isActive, type NavItem, operate, pageOf, system } from "@/app/nav"
+import { groups, isActive, type NavItem, operate, pageGroups, pageOf } from "@/app/nav"
 import { GlobalSearch, PhoneSearch, type SearchPage } from "@/app/search"
 import { settingsGroups } from "@/app/settings-sections"
 import { SaveScope } from "@/components/save-bar"
@@ -44,7 +44,7 @@ import { cn } from "@/lib/utils"
 /** The phone tab bar: the four pages used most; every page is in the More sheet. */
 const tabs = operate.slice(0, 4)
 /** Every page, for the search. */
-const searchPages: SearchPage[] = groups.flatMap((g) =>
+const searchPages: SearchPage[] = pageGroups.flatMap((g) =>
   g.items.map((i) => ({ to: i.to, label: i.label, group: g.label })),
 )
 
@@ -525,8 +525,8 @@ function UserMenu({ compact }: { compact?: boolean }) {
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => navigate("/settings/account")}>
-          <Settings /> Account settings
+        <DropdownMenuItem onClick={() => navigate("/account")}>
+          <UserRound /> Account
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={async () => {
@@ -582,7 +582,7 @@ function TabBar() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: closes on every navigation
   useEffect(() => setMore(false), [pathname])
   const inMore = !tabs.some((t) => isActive(t, pathname))
-  const pip = [...operate, ...system].some((i) => !tabs.includes(i) && counts.of(i))
+  const pip = groups.flatMap((g) => g.items).some((i) => !tabs.includes(i) && counts.of(i))
   const tabClass =
     "relative flex flex-1 flex-col items-center justify-center gap-[3px] text-meta font-semibold text-muted-foreground aria-[current=page]:text-ink [&_svg]:size-[22px]"
   return (
