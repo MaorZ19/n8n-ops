@@ -22,6 +22,7 @@ import { Link, useNavigate, useParams } from "react-router"
 import { useCrumb } from "@/app/chrome"
 import { AgentAccessCard } from "@/components/agent-access-card"
 import { useConfirm } from "@/components/confirm"
+import { ItemRow, ItemsHeader } from "@/components/item-row"
 import {
   Copyable,
   countChanges,
@@ -168,10 +169,17 @@ export function InstancesPage() {
       backup: { label: "Last backup", value: (r) => (r.lastBackup ? new Date(r.lastBackup.at) : null) },
     },
   })
+  const rowProps = (i: InstanceRow) => ({
+    "data-state": id === i.id ? "selected" : undefined,
+    "aria-current": id === i.id ? ("true" as const) : undefined,
+    className: "hover-row",
+    "data-href": `/instances/${i.id}`,
+    onClick: () => navigate(`/instances/${i.id}`),
+  })
   const down = rows.filter((r) => r.health === "down").length
   const warn = rows.filter((r) => r.health === "warn").length
 
-  const list = (
+  const list = (items: boolean) => (
     <>
       <PageHead
         title="Instances"
@@ -201,6 +209,59 @@ export function InstancesPage() {
             Add an n8n instance with its URL and an API key. Read-only is enough for monitoring.
           </Empty>
         </Panel>
+      ) : items ? (
+        <Table sort={sort} items>
+          <ItemsHeader label="Instance" />
+          <TableBody>
+            {sort.rows.map((i) => (
+              <TableRow key={i.id} {...rowProps(i)}>
+                <ItemRow
+                  lead={<Dot health={i.health} />}
+                  title={<UserText>{i.name}</UserText>}
+                  titleText={i.name}
+                  end={
+                    i.openProblems > 0 ? (
+                      <span className="font-semibold text-fail">{plural(i.openProblems, "open problem")}</span>
+                    ) : (
+                      <span className="text-small text-muted-foreground">No open problems</span>
+                    )
+                  }
+                  sub={
+                    <>
+                      {i.health === "ok" ? (
+                        healthLabel(i)
+                      ) : (
+                        <StatusTag kind="health" status={i.health}>
+                          {healthLabel(i)}
+                        </StatusTag>
+                      )}
+                      {" · "}
+                      {behind(i.version, latest) ? (
+                        <Badge variant="warn" title={`Latest is ${latest}`}>
+                          {i.version}
+                        </Badge>
+                      ) : (
+                        <span className="font-mono">{i.version ?? "version unknown"}</span>
+                      )}
+                      {" · "}
+                      {i.capabilities.find((c) => c.key === "move")?.available ? "read + write" : "read only"}
+                    </>
+                  }
+                  subEnd={
+                    i.lastBackup ? (
+                      <span className={cn(i.lastBackup.status === "failed" && "font-semibold text-fail")}>
+                        {i.lastBackup.status === "failed" ? "Backup failed " : "Backup "}
+                        <When value={i.lastBackup.at} />
+                      </span>
+                    ) : (
+                      "No backup yet"
+                    )
+                  }
+                />
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       ) : (
         <Table sort={sort}>
           <TableHeader>
@@ -219,14 +280,7 @@ export function InstancesPage() {
           </TableHeader>
           <TableBody>
             {sort.rows.map((i) => (
-              <TableRow
-                key={i.id}
-                data-state={id === i.id ? "selected" : undefined}
-                aria-current={id === i.id ? "true" : undefined}
-                className="hover-row"
-                data-href={`/instances/${i.id}`}
-                onClick={() => navigate(`/instances/${i.id}`)}
-              >
+              <TableRow key={i.id} {...rowProps(i)}>
                 <TableCell className="max-w-56 font-semibold">
                   <span className="flex items-center gap-2">
                     <Dot health={i.health} />

@@ -15,6 +15,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import { useCrumb } from "@/app/chrome"
 import { FilterBar, Picker, SearchBox } from "@/components/filter-bar"
 import { FlowGraph, type GraphNode } from "@/components/flow-graph"
+import { ItemRow, ItemsHeader, Said } from "@/components/item-row"
 import {
   Copyable,
   Empty,
@@ -92,6 +93,7 @@ export function ProblemsTable({
   showInstance = true,
   empty = "No problems here.",
   bare,
+  items,
 }: {
   rows: ProblemRow[]
   selected?: string
@@ -102,6 +104,8 @@ export function ProblemsTable({
   empty?: string
   /** Inside a panel that has its own header. */
   bare?: boolean
+  /** Each row as an item of a few lines, for a list beside a reading pane. */
+  items?: boolean
 }) {
   const sort = useSort(rows, {
     id: showInstance ? "problems" : "instance-problems",
@@ -121,6 +125,59 @@ export function ProblemsTable({
     const empt = <Empty title={empty}>A failure that n8n reports shows up here once, however often it repeats.</Empty>
     return bare ? empt : <Panel>{empt}</Panel>
   }
+  const rowProps = (p: ProblemRow) => ({
+    "data-state": selected === p.id ? "selected" : undefined,
+    "aria-current": selected === p.id ? ("true" as const) : undefined,
+    className: "hover-row",
+    "data-href": href?.(p.id),
+    onClick: () => onOpen(p.id),
+  })
+  if (items) {
+    return (
+      <Table bare={bare} sort={sort} items>
+        <ItemsHeader label="Problem" />
+        <TableBody>
+          {sort.rows.map((p) => (
+            <TableRow key={p.id} {...rowProps(p)}>
+              <ItemRow
+                title={<UserText>{p.workflowName}</UserText>}
+                titleText={p.workflowName}
+                end={
+                  <>
+                    <b className="font-semibold">{n(p.count)}</b>{" "}
+                    <span className="text-small text-muted-foreground">{p.count === 1 ? "failure" : "failures"}</span>
+                  </>
+                }
+                sub={
+                  <>
+                    <ProblemBadge status={p.status} regression={p.regression} firstSeen={p.firstSeen} />{" "}
+                    <UserText>{p.nodeName}</UserText>
+                    {showInstance && (
+                      <>
+                        {" · "}
+                        <UserText>{p.instanceName}</UserText>
+                      </>
+                    )}
+                  </>
+                }
+                subEnd={
+                  <>
+                    <Said>Last seen</Said>
+                    <When value={p.lastSeen} />
+                  </>
+                }
+                detail={
+                  <span className="font-mono text-small" title={p.errorMessage}>
+                    {p.errorMessage}
+                  </span>
+                }
+              />
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    )
+  }
   return (
     <Table bare={bare} sort={sort}>
       <TableHeader>
@@ -139,14 +196,7 @@ export function ProblemsTable({
       </TableHeader>
       <TableBody>
         {sort.rows.map((p) => (
-          <TableRow
-            key={p.id}
-            data-state={selected === p.id ? "selected" : undefined}
-            aria-current={selected === p.id ? "true" : undefined}
-            className="hover-row"
-            data-href={href?.(p.id)}
-            onClick={() => onOpen(p.id)}
-          >
+          <TableRow key={p.id} {...rowProps(p)}>
             <TableCell data-nolabel>
               <ProblemBadge status={p.status} regression={p.regression} firstSeen={p.firstSeen} />
             </TableCell>
@@ -195,7 +245,7 @@ export function ProblemsPage() {
   // "All" shows every status; the words then name no status.
   const noun = [statusWords[status], "problems"].filter(Boolean).join(" ")
 
-  const list = (
+  const list = (items: boolean) => (
     <>
       <PageHead
         title="Problems"
@@ -258,6 +308,7 @@ export function ProblemsPage() {
             selected={id}
             onOpen={open}
             href={(pid) => `/problems/${pid}?${params}`}
+            items={items}
             empty={q ? `No ${noun} match "${q}".` : `No ${noun}.`}
           />
         </Reloading>

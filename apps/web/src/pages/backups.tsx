@@ -12,6 +12,7 @@ import {
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { useCrumb } from "@/app/chrome"
+import { ItemRow, ItemsHeader, Said } from "@/components/item-row"
 import { Copyable, Empty, Kpi, Kpis, LoadError, Loading, Locked, PageHead, Panel, UserText } from "@/components/kit"
 import { ListWithPanel } from "@/components/list-panel"
 import { Dot, StatusTag, When } from "@/components/status"
@@ -108,7 +109,7 @@ export function BackupsPage() {
     },
   })
 
-  const list = (
+  const list = (items: boolean) => (
     <>
       <PageHead
         title="Backups"
@@ -171,20 +172,58 @@ export function BackupsPage() {
           <Loading>Loading backups…</Loading>
         </Panel>
       ) : (
-        <Table sort={sort}>
-          <TableHeader>
-            <TableRow>
-              <TableHead sort={sort.head("name")}>Instance</TableHead>
-              <TableHead sort={sort.head("lastOk")}>Last success</TableHead>
-              <TableHead>Includes</TableHead>
-              <TableHead sort={sort.head("time")}>Daily at</TableHead>
-              {s?.configured && <TableHead />}
-            </TableRow>
-          </TableHeader>
+        <Table sort={sort} items={items}>
+          {items ? (
+            <ItemsHeader label="Backup" />
+          ) : (
+            <TableHeader>
+              <TableRow>
+                <TableHead sort={sort.head("name")}>Instance</TableHead>
+                <TableHead sort={sort.head("lastOk")}>Last success</TableHead>
+                <TableHead>Includes</TableHead>
+                <TableHead sort={sort.head("time")}>Daily at</TableHead>
+                {s?.configured && <TableHead />}
+              </TableRow>
+            </TableHeader>
+          )}
           <TableBody>
             {sort.rows.map((r) => {
               const failed = r.lastRun?.status === "failed"
               const late = stale(r)
+              const dot = (
+                <Dot
+                  health={failed ? "down" : late ? "warn" : "ok"}
+                  label={failed ? "Last backup failed" : late ? "Backup is late" : "Backed up on time"}
+                />
+              )
+              const lastOkTime = (
+                <span className={cn(late && "font-semibold text-warn")}>
+                  <When value={r.lastOk?.startedAt} />
+                </span>
+              )
+              const tag = failed ? (
+                <StatusTag kind="backup" status="failed" />
+              ) : (
+                late && <StatusTag kind="backup" status="stale" />
+              )
+              const includes =
+                r.id === "self"
+                  ? "database dump"
+                  : r.withSecrets
+                    ? "workflows + credential secrets"
+                    : "workflows, credentials without secrets"
+              const runNow = s?.configured && (
+                <Button
+                  size="sm"
+                  disabled={r.lastRun?.status === "running"}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    run.mutate(r.id, { onSuccess: () => toast.success(`Backup of ${r.name} started`) })
+                  }}
+                >
+                  <Play /> {r.lastRun?.status === "running" ? "Running…" : "Run now"}
+                </Button>
+              )
               return (
                 <TableRow
                   key={r.id}
@@ -194,48 +233,44 @@ export function BackupsPage() {
                   data-href={`/backups/${r.id}`}
                   onClick={() => navigate(`/backups/${r.id}`)}
                 >
-                  <TableCell className="max-w-56 font-semibold">
-                    <span className="flex items-center gap-2">
-                      <Dot
-                        health={failed ? "down" : late ? "warn" : "ok"}
-                        label={failed ? "Last backup failed" : late ? "Backup is late" : "Backed up on time"}
-                      />
-                      <UserText className="truncate">{r.name}</UserText>
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="flex items-center gap-2">
-                      <span className={cn(late && "font-semibold text-warn")}>
-                        <When value={r.lastOk?.startedAt} />
-                      </span>
-                      {failed ? (
-                        <StatusTag kind="backup" status="failed" />
-                      ) : (
-                        late && <StatusTag kind="backup" status="stale" />
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {r.id === "self"
-                      ? "database dump"
-                      : r.withSecrets
-                        ? "workflows + credential secrets"
-                        : "workflows, credentials without secrets"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">{r.backupTime}</TableCell>
-                  {s?.configured && (
-                    <TableCell className="text-end">
-                      <Button
-                        size="sm"
-                        disabled={r.lastRun?.status === "running"}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          run.mutate(r.id, { onSuccess: () => toast.success(`Backup of ${r.name} started`) })
-                        }}
-                      >
-                        <Play /> {r.lastRun?.status === "running" ? "Running…" : "Run now"}
-                      </Button>
-                    </TableCell>
+                  {items ? (
+                    <ItemRow
+                      lead={dot}
+                      title={<UserText>{r.name}</UserText>}
+                      titleText={r.name}
+                      end={
+                        <>
+                          <Said>Last success</Said>
+                          {lastOkTime}
+                        </>
+                      }
+                      sub={
+                        <>
+                          {tag && <>{tag} </>}
+                          {includes}
+                        </>
+                      }
+                      subEnd={<span className="tabular-nums">daily at {r.backupTime}</span>}
+                      action={runNow || undefined}
+                    />
+                  ) : (
+                    <>
+                      <TableCell className="max-w-56 font-semibold">
+                        <span className="flex items-center gap-2">
+                          {dot}
+                          <UserText className="truncate">{r.name}</UserText>
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="flex items-center gap-2">
+                          {lastOkTime}
+                          {tag}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{includes}</TableCell>
+                      <TableCell className="text-muted-foreground tabular-nums">{r.backupTime}</TableCell>
+                      {runNow && <TableCell className="text-end">{runNow}</TableCell>}
+                    </>
                   )}
                 </TableRow>
               )
