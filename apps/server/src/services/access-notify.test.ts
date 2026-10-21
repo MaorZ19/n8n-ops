@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { accessOutcome, isApprover, renderAccessEmail, renderAccessTelegram } from "./access-notify.ts"
+import { telegramPlainText } from "./telegram.ts"
 
 const request = {
   id: "3f2a9c10-0000-4000-8000-000000000001",
@@ -29,13 +30,40 @@ describe("who may approve in Telegram", () => {
 })
 
 describe("request messages", () => {
+  const outcome = (...args: Parameters<typeof accessOutcome>) => {
+    const { icon, lines } = accessOutcome(...args)
+    return { icon, lines: lines.map(String) }
+  }
+
   it("show what is asked, escaped for Telegram", () => {
-    const text = renderAccessTelegram(request)
+    const text = String(renderAccessTelegram(request))
     expect(text.startsWith("🔐 <b>Access request</b> · flow")).toBe(true)
     expect(text).toContain("Fix the &lt;Set&gt; node")
     expect(text).toContain("workflow:read, workflow:update")
     expect(text).toContain("Workflows: <code>w1</code>")
     expect(text.endsWith("For 1 h 30 min")).toBe(true)
+  })
+
+  it("stay within Telegram's 4096 characters with long lists, and count what is left out", () => {
+    const long = {
+      ...request,
+      instance: "i".repeat(5000),
+      token: "t".repeat(5000),
+      reason: "r".repeat(500),
+      scopes: Array.from({ length: 300 }, (_, i) => `scope:${i}`.padEnd(80, "s")),
+      workflowIds: Array.from({ length: 50 }, (_, i) => `${i}`.padEnd(83, "w")),
+    }
+    const approved = {
+      status: "revoked" as const,
+      decidedAt: new Date(),
+      decidedBy: "d".repeat(5000),
+      decidedVia: "web",
+      expiresAt: new Date(),
+      endedAt: new Date(),
+    }
+    const text = String(renderAccessTelegram(long, accessOutcome(approved, "UTC")))
+    expect([...telegramPlainText(text)].length).toBeLessThan(4096)
+    expect(text).toMatch(/<\/code> and \d+ more\nWorkflows: <code>0w+, 1w+, .*<\/code> and \d+ more\n/)
   })
 
   it("show at a glance who decided where, and then how the access ended", () => {
@@ -48,37 +76,37 @@ describe("request messages", () => {
       endedAt: null,
     }
     const zone = "Asia/Jerusalem"
-    const text = renderAccessTelegram(request, accessOutcome(approved, zone))
+    const text = String(renderAccessTelegram(request, accessOutcome(approved, zone)))
     expect(text.startsWith("✅ <b>Access request</b>")).toBe(true)
     expect(text.endsWith("For 1 h 30 min\n\n✅ <b>Approved</b> by @ShlomiMe via Telegram\nAccess until 13:32")).toBe(
       true,
     )
 
     const ended = new Date("2026-10-21T10:18:07Z")
-    expect(accessOutcome({ ...approved, status: "released", endedAt: ended }, zone).lines).toEqual([
+    expect(outcome({ ...approved, status: "released", endedAt: ended }, zone).lines).toEqual([
       "✅ <b>Approved</b> by @ShlomiMe via Telegram",
       "⏹ <b>Released</b> by the agent at 13:18",
     ])
-    expect(accessOutcome({ ...approved, status: "expired", endedAt: ended }, zone).lines[1]).toBe(
+    expect(outcome({ ...approved, status: "expired", endedAt: ended }, zone).lines[1]).toBe(
       "⌛ <b>Access ended</b> at 13:18",
     )
-    expect(accessOutcome({ ...approved, status: "revoked", endedAt: ended }, zone).lines[1]).toBe(
+    expect(outcome({ ...approved, status: "revoked", endedAt: ended }, zone).lines[1]).toBe(
       "⛔ <b>Revoked</b> at 13:18",
     )
-    expect(accessOutcome({ ...approved, status: "denied", decidedBy: "shlomi", decidedVia: "web" }, zone)).toEqual({
+    expect(outcome({ ...approved, status: "denied", decidedBy: "shlomi", decidedVia: "web" }, zone)).toEqual({
       icon: "❌",
       lines: ["❌ <b>Denied</b> by shlomi via n8n-ops"],
     })
     const undecided = { ...approved, decidedAt: null, decidedBy: null, decidedVia: null, expiresAt: null }
-    expect(accessOutcome({ ...undecided, status: "expired", endedAt: ended }, zone)).toEqual({
+    expect(outcome({ ...undecided, status: "expired", endedAt: ended }, zone)).toEqual({
       icon: "⌛",
       lines: ["⌛ <b>Expired</b> without a decision"],
     })
-    expect(accessOutcome({ ...undecided, status: "released", endedAt: ended }, zone).lines).toEqual([
+    expect(outcome({ ...undecided, status: "released", endedAt: ended }, zone).lines).toEqual([
       "↩️ <b>Withdrawn</b> by the agent at 13:18",
     ])
     // A name that looks like markup stays text.
-    expect(accessOutcome({ ...approved, decidedBy: "<b>x</b>", decidedVia: "web" }, "UTC").lines[0]).toBe(
+    expect(outcome({ ...approved, decidedBy: "<b>x</b>", decidedVia: "web" }, "UTC").lines[0]).toBe(
       "✅ <b>Approved</b> by &lt;b&gt;x&lt;/b&gt; via n8n-ops",
     )
   })

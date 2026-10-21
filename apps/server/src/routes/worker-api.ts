@@ -5,7 +5,7 @@ import { z } from "zod"
 import type { Ctx } from "../context.ts"
 import { backupRuns, instances, workerJobs, workers } from "../db/schema.ts"
 import { finishRun } from "../services/backups.ts"
-import { applyHealth, type HealthReport } from "../services/health.ts"
+import { applyWorkerReport } from "../services/health.ts"
 import { presignUpload, requireStorage, verifyObject } from "../services/storage.ts"
 import { claimJob, deliverToWaiter, pairWorker, workerByIdentity } from "../services/workers.ts"
 
@@ -93,7 +93,7 @@ export function workerApiRoutes(ctx: Ctx) {
     if (job.kind === "backup") await finishBackupJob(ctx, String(job.payload.runId), ok, result, error)
     if (job.kind === "probe" && job.instanceId && ok) {
       const [instance] = await ctx.db.select().from(instances).where(eq(instances.id, job.instanceId))
-      if (instance) await applyHealth(ctx, instance, { ...(result as unknown as HealthReport), via: "worker" })
+      if (instance) await applyWorkerReport(ctx, instance, result, c.get("worker").name)
     }
     return c.json({ ok: true })
   })
