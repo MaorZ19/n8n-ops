@@ -158,10 +158,11 @@ export async function finishRun(
   const name = instance?.name ?? "n8n-ops"
   if (!outcome.ok) {
     ctx.log.warn("backup failed", { instance: name, error: outcome.error })
-    await enqueueAlert(ctx, "backup", backupAlerts.failed(name, outcome.error))
+    await enqueueAlert(ctx, "backup", backupAlerts.failed(name, outcome.error), { instanceName: instance?.name })
   } else {
     await setCondition(ctx, `backup:${run.instanceId ?? "self"}`, false, {
       kind: "backup",
+      subject: { instanceName: instance?.name },
       start: () => html``,
       clear: () => backupAlerts.working(name),
     })
@@ -225,6 +226,7 @@ export async function scheduleBackups(ctx: Ctx, now = new Date()) {
     const stale = now.getTime() - reference.getTime() > s.staleBackupHours * 3600_000
     await setCondition(ctx, `backup:${instance.id}`, stale, {
       kind: "backup",
+      subject: { instanceName: instance.name },
       start: () => backupAlerts.stale(instance.name, s.staleBackupHours),
     })
   }

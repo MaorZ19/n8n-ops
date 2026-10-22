@@ -210,7 +210,12 @@ export async function notifyAccess(ctx: Ctx) {
     const patch: Partial<typeof accessRequests.$inferInsert> = { notifyAttemptAt: new Date() }
     if (needTelegram && tg) {
       try {
-        patch.telegramMessageId = await tg.api.send(tg.chatId, renderAccessTelegram(info), buttons(r.id, link))
+        patch.telegramMessageId = await tg.api.send(
+          tg.chatId,
+          renderAccessTelegram(info),
+          buttons(r.id, link),
+          tg.accessThreadId,
+        )
       } catch (e) {
         errors.push(`Telegram: ${(e as Error).message}`)
       }

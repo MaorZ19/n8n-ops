@@ -323,6 +323,8 @@ export const alertOutbox = pgTable(
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
     telegramMessageId: integer("telegram_message_id"),
+    /** Forum topic the alert goes to, chosen when it is queued. Null is the chat's General topic. */
+    threadId: integer("thread_id"),
     createdAt: created(),
     sentAt: ts("sent_at"),
   },
@@ -334,6 +336,8 @@ export const alertGroups = pgTable("alert_groups", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupKey: text("group_key").notNull(),
   telegramMessageId: integer("telegram_message_id").notNull(),
+  /** Forum topic of the message. Null is the chat's General topic. */
+  threadId: integer("thread_id"),
   problemIds: jsonb("problem_ids").$type<string[]>().notNull().default([]),
   createdAt: created(),
 })

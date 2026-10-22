@@ -47,9 +47,16 @@ export class Telegram {
     return json.result as T
   }
 
-  async send(chatId: string, text: TelegramHtml, buttons: InlineButton[][] = []): Promise<number> {
+  /** Sends a message. `threadId` posts it in a forum topic; edits need no thread, the message ID is enough. */
+  async send(
+    chatId: string,
+    text: TelegramHtml,
+    buttons: InlineButton[][] = [],
+    threadId?: number | null,
+  ): Promise<number> {
     const result = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
+      ...(threadId ? { message_thread_id: threadId } : {}),
       text: String(text),
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },

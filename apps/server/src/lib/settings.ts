@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm"
 import { z } from "zod"
 import type { Db } from "../db/client.ts"
 import { settings as settingsTable } from "../db/schema.ts"
+import { telegramRouteSchema } from "../services/alert-routing.ts"
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "use HH:MM")
 
@@ -73,6 +74,11 @@ export const sections = {
     botTokenEnc: z.string().optional(),
     chatId: z.string(),
     webhookSecret: z.string(),
+    /** Forum topic routing: first matching route wins, then `defaultThreadId`, then the General topic. */
+    routes: z.array(telegramRouteSchema).max(200).default([]),
+    defaultThreadId: z.number().int().positive().optional(),
+    /** Topic for agent access requests; falls back to `defaultThreadId`. */
+    accessThreadId: z.number().int().positive().optional(),
   }),
   email: z.object({
     dailyEnabled: z.boolean(),
@@ -154,7 +160,7 @@ export const defaults: { [K in SectionName]: Section<K> } = {
     editWindowMin: 60,
     retryMin: 5,
   },
-  telegram: { chatId: "", webhookSecret: "" },
+  telegram: { chatId: "", webhookSecret: "", routes: [] },
   email: {
     dailyEnabled: false,
     dailyTime: "07:30",
