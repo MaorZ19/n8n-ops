@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { N8nWorkflow } from "../n8n/client.ts"
-import { calledWorkflowIds, credentialIds, structureHash } from "./workflows.ts"
+import { N8nError, type N8nWorkflow } from "../n8n/client.ts"
+import { calledWorkflowIds, credentialIds, executionsSince, structureHash } from "./workflows.ts"
 
 const base: N8nWorkflow = {
   id: "1",
@@ -65,5 +65,43 @@ describe("references", () => {
       ],
     }
     expect(calledWorkflowIds(caller)).toEqual(["w9", "w10"])
+  })
+})
+
+describe("executionsSince", () => {
+  const since = "2026-10-01T00:00:00.000Z"
+  const ex = (id: string, startedAt: string) => ({ workflowId: id, status: "success", startedAt }) as never
+
+  it("uses startedAfter when the instance accepts it", async () => {
+    const calls: unknown[] = []
+    const client = {
+      listExecutions: async (q: Record<string, unknown>) => {
+        calls.push(q)
+        return q.cursor ? { data: [ex("b", "2026-10-02T00:00:00Z")], nextCursor: null } : { data: [ex("a", "2026-10-03T00:00:00Z")], nextCursor: "c1" }
+      },
+    }
+    const out = await executionsSince(client, since)
+    expect(out.map((e: { workflowId: string }) => e.workflowId)).toEqual(["a", "b"])
+    expect(calls.every((q) => (q as { startedAfter?: string }).startedAfter === since)).toBe(true)
+  })
+
+  it("falls back to client-side filtering when startedAfter is unknown (n8n 2.18)", async () => {
+    const calls: Record<string, unknown>[] = []
+    const client = {
+      listExecutions: async (q: Record<string, unknown>) => {
+        calls.push(q)
+        if (q.startedAfter) throw new N8nError("n8n answered 400 for GET /executions", 400, `{"message":"Unknown query parameter 'startedAfter'"}`)
+        if (!q.cursor) return { data: [ex("a", "2026-10-05T00:00:00Z"), ex("b", "2026-10-02T00:00:00Z")], nextCursor: "c1" }
+        return { data: [ex("c", "2026-10-01T10:00:00Z"), ex("old", "2026-09-20T00:00:00Z")], nextCursor: "c2" }
+      },
+    }
+    const out = await executionsSince(client, since)
+    expect(out.map((e: { workflowId: string }) => e.workflowId)).toEqual(["a", "b", "c"])
+    expect(calls.length).toBe(3) // one rejected try, two pages, stops at the first older execution
+  })
+
+  it("rethrows other errors", async () => {
+    const client = { listExecutions: async () => { throw new N8nError("n8n answered 401 for GET /executions", 401) } }
+    await expect(executionsSince(client, since)).rejects.toThrow("401")
   })
 })
