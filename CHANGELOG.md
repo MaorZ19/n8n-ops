@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-22
+
 ### Added
 
 - **Failure monitoring.** Reads every instance's failed executions and groups them into problems, one per workflow, node and exact error, with the full stored execution. Regressions, auto-resolve, mute, merge and retention; the first sync is silent.
