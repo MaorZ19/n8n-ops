@@ -1,4 +1,5 @@
-import { writeFileSync } from "node:fs"
+import { readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { currentApiKey, dialogClosed, loadPrivateKey, n8nApi, n8nUrl, signIn } from "./helpers.ts"
 
@@ -18,24 +19,69 @@ test.afterAll(async () => {
   await page.close()
 })
 
-test("backup storage is configured and verified", async () => {
+test("an S3 bucket and the mapped folder are added as destinations, each tested first", async () => {
+  // The old address of the section still leads to it.
   await page.goto("/settings/storage")
-  await page.getByLabel("Endpoint").fill("http://s3:9090")
-  await page.getByLabel("Region").fill("us-east-1")
-  await page.getByLabel("Bucket").fill("n8n-ops-backups")
-  await page.getByLabel("Key prefix").fill("e2e")
-  await page.getByLabel("Access key ID").fill("test")
-  await page.getByLabel("Secret access key").fill("test-secret")
-  await page.getByRole("button", { name: "Save" }).click()
-  await expect(page.getByText("Settings saved")).toBeVisible()
-  await page.getByRole("button", { name: "Upload and verify a test file" }).click()
-  await expect(page.getByText("Upload and download verified")).toBeVisible()
+  await expect(page).toHaveURL(/\/settings\/destinations$/)
+  const add = async (fill: () => Promise<void>, name: string) => {
+    await page.getByRole("button", { name: "Add destination" }).click()
+    await fill()
+    await page.getByLabel("Name", { exact: true }).fill(name)
+    await page.getByRole("button", { name: "Test and add" }).click()
+    await expect(page.getByText(`Added ${name}`)).toBeVisible({ timeout: 30_000 })
+    await dialogClosed(page)
+  }
+  await add(async () => {
+    await page.getByLabel("Endpoint", { exact: true }).fill("http://s3:9090")
+    await page.getByLabel("Bucket", { exact: true }).fill("n8n-ops-backups")
+    await page.getByLabel("Key prefix", { exact: true }).fill("e2e")
+    await page.getByLabel("Access key ID", { exact: true }).fill("test")
+    await page.getByLabel("Secret access key", { exact: true }).fill("test-secret")
+  }, "Offsite S3")
+  await add(async () => {
+    await page.getByRole("radio", { name: "Folder" }).click()
+    await page.getByLabel("Folder under /backups", { exact: true }).fill("nightly")
+    await page.getByLabel("Keep daily", { exact: true }).fill("3")
+  }, "This server")
+  const s3 = page.getByTestId("destination-Offsite S3")
+  await expect(s3.getByText("Default")).toBeVisible()
+  await expect(s3.getByText("s3://n8n-ops-backups/e2e at s3:9090")).toBeVisible()
+  await expect(page.getByTestId("destination-This server").getByText("Keeps 3 days, 4 weeks, 6 months")).toBeVisible()
+
+  // A folder that holds another destination's folder is refused: retention there would remove its archives.
+  await page.getByRole("button", { name: "Add destination" }).click()
+  await page.getByRole("radio", { name: "Folder" }).click()
+  await page.getByLabel("Name", { exact: true }).fill("Everything")
+  await page.getByRole("button", { name: "Test and add" }).click()
+  await expect(page.getByText(/already used by the destination "This server"/)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await dialogClosed(page)
+
+  // The saved destination tests again on demand.
+  await s3.getByRole("button", { name: "Test" }).click()
+  await expect(page.getByText("Offsite S3 works")).toBeVisible()
+})
+
+test("a wrong secret is refused before a destination is stored", async () => {
+  await page.goto("/settings/destinations")
+  await page.getByRole("button", { name: "Add destination" }).click()
+  await page.getByLabel("Name", { exact: true }).fill("Broken S3")
+  await page.getByLabel("Endpoint", { exact: true }).fill("http://s3:1")
+  await page.getByLabel("Bucket", { exact: true }).fill("n8n-ops-backups")
+  await page.getByLabel("Key prefix", { exact: true }).fill("broken")
+  await page.getByLabel("Access key ID", { exact: true }).fill("test")
+  await page.getByLabel("Secret access key", { exact: true }).fill("test-secret")
+  await page.getByRole("button", { name: "Test and add" }).click()
+  await expect(page.getByText(/The destination test failed/)).toBeVisible({ timeout: 70_000 })
+  await page.keyboard.press("Escape")
+  await dialogClosed(page)
+  await expect(page.getByTestId("destination-Broken S3")).toHaveCount(0)
 })
 
 test("a worker pairs with a one-time token", async () => {
   await page.goto("/workers")
   await page.getByRole("button", { name: "Add worker" }).first().click()
-  await page.getByLabel("Name").fill("E2E Host")
+  await page.getByLabel("Name", { exact: true }).fill("E2E Host")
   // The socket proxy is on by default and needs the n8n containers to allow.
   await expect(page.getByLabel("Limit Docker access with a socket proxy")).toBeChecked()
   await expect(page.getByRole("button", { name: "Create pairing token" })).toBeDisabled()
@@ -92,6 +138,60 @@ test("a backup through the worker includes credential secrets", async () => {
     .click()
   await page.getByRole("row", { name: /e2e-n8n/ }).click()
   await expect(page.getByText("OK · with secrets")).toBeVisible({ timeout: 90_000 })
+  // One copy on each default destination, both read back and verified.
+  const result = page.getByRole("cell", { name: /OK · with secrets/ }).first()
+  await expect(result.getByText("Written")).toHaveCount(2)
+  await expect(result.getByText("Offsite S3")).toBeVisible()
+  await expect(result.getByText("This server")).toBeVisible()
+  // The copy in the mapped folder is on the host, encrypted.
+  const folder = "/backups-data/nightly/e2e-n8n"
+  const archives = readdirSync(folder, { recursive: true })
+    .map(String)
+    .filter((f) => f.endsWith(".tar.gz.age"))
+  expect(archives).toHaveLength(1)
+  const head = readFileSync(join(folder, archives[0] ?? ""))
+    .subarray(0, 21)
+    .toString()
+  expect(head).toBe("age-encryption.org/v1")
+})
+
+test("an instance can choose its destinations instead of the defaults", async () => {
+  await page.goto("/instances")
+  await page.getByRole("row", { name: /e2e-n8n/ }).click()
+  const card = page.locator("section").filter({ has: page.getByRole("heading", { name: "Backup Destinations" }) })
+  await expect(card.getByText("Now: Offsite S3, This server.")).toBeVisible()
+  await card.getByRole("radio", { name: "Choose" }).click()
+  await card.getByLabel("Offsite S3").check()
+  await page.getByRole("button", { name: "Save" }).click()
+  await expect(page.getByText("Backup destinations saved")).toBeVisible()
+  await page.goto("/backups")
+  const row = page.getByRole("row", { name: /e2e-n8n/ })
+  await expect(row).toContainText("Offsite S3")
+  await expect(row).not.toContainText("This server")
+  // Back to the defaults, which the next tests use.
+  await page.goto("/instances")
+  await page.getByRole("row", { name: /e2e-n8n/ }).click()
+  await card.getByRole("radio", { name: "Default destinations" }).click()
+  await page.getByRole("button", { name: "Save" }).click()
+  await expect(page.getByText("Backup destinations saved")).toBeVisible()
+})
+
+test("n8n-ops backs up its own database to the destinations", async () => {
+  await page.goto("/backups")
+  await page
+    .getByRole("row", { name: /n8n-ops database/ })
+    .getByRole("button", { name: "Run now" })
+    .click()
+  await page.getByRole("row", { name: /n8n-ops database/ }).click()
+  // The pane of the instance opened before is replaced by the database's own history.
+  const history = page.getByRole("region", { name: "Backups · n8n-ops database" })
+  await expect(history.getByText("OK · with secrets")).toBeVisible({ timeout: 90_000 })
+  await expect(history.getByText("Written")).toHaveCount(2)
+  const dumps = () =>
+    readdirSync("/backups-data/nightly/_n8n-ops", { recursive: true })
+      .map(String)
+      .filter((f) => f.endsWith(".dump.age"))
+  expect(dumps()).toHaveLength(1)
 })
 
 test("a workflow is restored from the backup with the private key", async () => {
